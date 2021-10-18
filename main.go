@@ -1,10 +1,33 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/stellar/go/clients/horizonclient"
+	"github.com/stellar/go/keypair"
+	"github.com/stellar/go/network"
+	"github.com/stellar/go/txnbuild"
 )
+
+var accMain_pub = "GBEQ4NSJHC2VLJH3UH2HYVE6D6UVCRONXPFOZSQTOTSAY3BLYSZPIU65"
+var accMain_sec = "SBKYM5IAUGQTWI4AZMG4NCVT6A3WQHLMG3NBNSOZ3JAYD6NONQD3TQUD"
+
+type AuthorizationRequest struct {
+	PublicKey string `json:"publicKey" binding:"required"`
+	StudentId string `json:"studentId" binding:"required"`
+	Pin       string `json:"pin" binding:"required"`
+}
+
+type AuthorizationResponse struct {
+	Status          string `json:"status" binding:"required"`
+	TransactionHash string `json:"transactionHash" binding:"required"`
+	ErrorLog        string `json:"errorLog",omitempty binding:"required"`
+}
 
 // album represents data about a record album.
 type album struct {
@@ -27,7 +50,137 @@ func main() {
 	router.GET("/albums/:id", getAlbumByID)
 	router.POST("/albums", postAlbums)
 
-	router.Run("localhost:8080")
+	router.POST("/api/v1/authorization/new", authorization)
+
+	router.Run("localhost:1323")
+}
+
+func authorization(c *gin.Context) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	var req AuthorizationRequest
+
+	if err := c.BindJSON(&req); err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	log.Println(req)
+
+	accMainPair, err := keypair.ParseFull(accMain_sec)
+
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: accMain_pub,
+	})
+
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	/*
+
+
+			accStudent, err := client.AccountDetail(horizonclient.AccountRequest{
+				AccountID: req.publicKey,
+			})
+
+		if err != nil {
+			log.Println(err)
+			return
+		}*/
+
+	asset := txnbuild.NativeAsset{}
+
+	paymentOp := txnbuild.Payment{
+		Destination: req.PublicKey,
+		Amount:      "1",
+		Asset:       asset,
+	}
+
+	sha := sha256.Sum224([]byte(req.StudentId + req.Pin))
+	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accMain,
+		IncrementSequenceNum: true,
+		Operations: []txnbuild.Operation{
+			&paymentOp,
+		},
+		BaseFee:    txnbuild.MinBaseFee,
+		Timebounds: txnbuild.NewTimeout(100),
+		Memo:       txnbuild.MemoText(hash),
+	})
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err, hash),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	txe, err := tx.Base64()
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	resp, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		log.Fatal("Error submitting transaction:", hError)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(hError),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, &AuthorizationResponse{
+		Status:          "OK",
+		TransactionHash: resp.Hash,
+	})
+
 }
 
 // getAlbums responds with the list of all albums as JSON.
