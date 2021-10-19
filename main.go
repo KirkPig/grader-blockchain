@@ -29,6 +29,20 @@ type AuthorizationResponse struct {
 	ErrorLog        string `json:"errorLog",omitempty binding:"required"`
 }
 
+type SubmitRequest struct {
+	PublicKey string `json:"publicKey" binding:"required"`
+	SecretKey string `json:"secretKey" binding:"required"`
+	StudentId string `json:"studentId" binding:"required"`
+	Pin       string `json:"pin" binding:"required"`
+	Code      string `json:"code" binding:"required"`
+}
+
+type SubmitResponse struct {
+	Status          string `json:"status" binding:"required"`
+	TransactionHash string `json:"transactionHash" binding:"required"`
+	ErrorLog        string `json:"errorLog",omitempty`
+}
+
 // album represents data about a record album.
 type album struct {
 	ID     string  `json:"id"`
@@ -53,6 +67,118 @@ func main() {
 	router.POST("/api/v1/authorization/new", authorization)
 
 	router.Run("localhost:1323")
+}
+
+func submit(c *gin.Context) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	var req SubmitRequest
+
+	if err := c.BindJSON(&req); err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+	}
+
+	accStudentPair, err := keypair.ParseFull(req.SecretKey)
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+	}
+
+	accStudent, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: req.PublicKey,
+	})
+
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+	}
+
+	// Check Authorization
+
+	asset := txnbuild.NativeAsset{}
+
+	paymentOp := txnbuild.Payment{
+		Destination: accMain_pub,
+		Amount:      string(txnbuild.MinBaseFee),
+		Asset:       asset,
+	}
+
+	sha := sha256.Sum256([]byte(req.StudentId + req.Pin + req.Code))
+	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accStudent,
+		IncrementSequenceNum: true,
+		Operations: []txnbuild.Operation{
+			&paymentOp,
+		},
+		BaseFee:    txnbuild.MinBaseFee,
+		Timebounds: txnbuild.NewTimeout(100),
+		Memo:       txnbuild.MemoText(hash),
+	})
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err, hash),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accStudentPair)
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	txe, err := tx.Base64()
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	resp, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		log.Fatal("Error submitting transaction:", hError)
+		c.IndentedJSON(http.StatusBadRequest, &SubmitResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(hError),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, &SubmitResponse{
+		Status:          "OK",
+		TransactionHash: resp.Hash,
+	})
+
 }
 
 func authorization(c *gin.Context) {
