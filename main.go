@@ -115,12 +115,14 @@ func authorization(c *gin.Context) {
 
 	paymentOp := txnbuild.Payment{
 		Destination: req.PublicKey,
-		Amount:      "1",
+		Amount:      "0.5", // Only Half Each
 		Asset:       asset,
 	}
 
-	sha := sha256.Sum224([]byte(req.StudentId + req.Pin))
+	sha := sha256.Sum256([]byte(req.StudentId + req.Pin))
 	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
+
+	// First Transaction
 
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount:        &accMain,
@@ -130,7 +132,7 @@ func authorization(c *gin.Context) {
 		},
 		BaseFee:    txnbuild.MinBaseFee,
 		Timebounds: txnbuild.NewTimeout(100),
-		Memo:       txnbuild.MemoText(hash),
+		Memo:       txnbuild.MemoText(hash[:28]), // First 28 Character
 	})
 	if err != nil {
 		log.Println(err)
@@ -176,9 +178,65 @@ func authorization(c *gin.Context) {
 		return
 	}
 
+	// Second Transaction
+
+	tx, err = txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accMain,
+		IncrementSequenceNum: true,
+		Operations: []txnbuild.Operation{
+			&paymentOp,
+		},
+		BaseFee:    txnbuild.MinBaseFee,
+		Timebounds: txnbuild.NewTimeout(100),
+		Memo:       txnbuild.MemoText(hash[28:]), // remain character
+	})
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err, hash),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	txe, err = tx.Base64()
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	resp2, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		log.Fatal("Error submitting transaction:", hError)
+		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(hError),
+			TransactionHash: "",
+		})
+		return
+	}
+
 	c.IndentedJSON(http.StatusOK, &AuthorizationResponse{
 		Status:          "OK",
-		TransactionHash: resp.Hash,
+		TransactionHash: resp.Hash + ", " + resp2.Hash,
 	})
 
 }
