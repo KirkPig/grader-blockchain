@@ -71,7 +71,7 @@ func authorization(c *gin.Context) {
 		return
 	}
 
-	log.Println(req)
+	// log.Println(req)
 
 	accMainPair, err := keypair.ParseFull(accMain_sec)
 
@@ -119,7 +119,7 @@ func authorization(c *gin.Context) {
 		Asset:       asset,
 	}
 
-	sha := sha256.Sum224([]byte(req.StudentId + req.Pin))
+	sha := sha256.Sum256([]byte(req.StudentId + req.Pin))
 	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
 
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
@@ -130,7 +130,7 @@ func authorization(c *gin.Context) {
 		},
 		BaseFee:    txnbuild.MinBaseFee,
 		Timebounds: txnbuild.NewTimeout(100),
-		Memo:       txnbuild.MemoText(hash),
+		Memo:       txnbuild.MemoText(hash[:28]), // Trim SHA256 with base64 to 28 Character
 	})
 	if err != nil {
 		log.Println(err)
