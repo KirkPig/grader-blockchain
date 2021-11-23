@@ -32,6 +32,10 @@ func (h *Handler) AuthorizationHandler(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, h.service.Authorization(&req))
+	response, err := h.service.Authorization(&req)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	c.JSON(http.StatusOK, response)
 
 }

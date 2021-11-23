@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
-	"log"
 
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
@@ -22,19 +21,18 @@ func NewService() *Service {
 	return &Service{}
 }
 
-func (s *Service) Authorization(req *AuthorizationRequest) *AuthorizationResponse {
+func (s *Service) Authorization(req *AuthorizationRequest) (*AuthorizationResponse, error) {
 
 	client := horizonclient.DefaultTestNetClient
 
 	accMainPair, err := keypair.ParseFull(accMain_sec)
 
 	if err != nil {
-		log.Println(err)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err),
 			TransactionHash: "",
-		}
+		}, err
 	}
 
 	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
@@ -42,12 +40,11 @@ func (s *Service) Authorization(req *AuthorizationRequest) *AuthorizationRespons
 	})
 
 	if err != nil {
-		log.Println(err)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err),
 			TransactionHash: "",
-		}
+		}, err
 	}
 
 	/*
@@ -84,48 +81,44 @@ func (s *Service) Authorization(req *AuthorizationRequest) *AuthorizationRespons
 		Memo:       txnbuild.MemoText(hash),
 	})
 	if err != nil {
-		log.Println(err)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err, hash),
 			TransactionHash: "",
-		}
+		}, err
 	}
 
 	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
 	if err != nil {
-		log.Println(err)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err),
 			TransactionHash: "",
-		}
+		}, err
 	}
 
 	txe, err := tx.Base64()
 	if err != nil {
-		log.Println(err)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err),
 			TransactionHash: "",
-		}
+		}, err
 	}
 
 	resp, err := client.SubmitTransactionXDR(txe)
 	if err != nil {
 		hError := err.(*horizonclient.Error)
-		log.Fatal("Error submitting transaction:", hError)
 		return &AuthorizationResponse{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(hError),
 			TransactionHash: "",
-		}
+		}, hError
 	}
 
 	return &AuthorizationResponse{
 		Status:          "OK",
 		TransactionHash: resp.Hash,
-	}
+	}, nil
 
 }
