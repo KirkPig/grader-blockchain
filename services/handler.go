@@ -18,6 +18,23 @@ func NewHandler(s *Service) *Handler {
 	}
 }
 
+func (h *Handler) GetTransactionHandler(c *gin.Context) {
+
+	pubKey := c.Param("pub_key")
+
+	transaction_list, err := h.service.GetAllTransaction(pubKey)
+
+	if err != nil {
+		c.IndentedJSON(http.StatusOK, &gin.H{
+			"log": err,
+		})
+		return
+	}
+
+	c.IndentedJSON(http.StatusOK, transaction_list)
+
+}
+
 func (h *Handler) AuthorizationHandler(c *gin.Context) {
 
 	var req AuthorizationRequest
@@ -34,7 +51,7 @@ func (h *Handler) AuthorizationHandler(c *gin.Context) {
 
 	response, err := h.service.Authorization(&req)
 	if err != nil {
-		log.Fatalln(err)
+		log.Println(err)
 	}
 	c.JSON(http.StatusOK, response)
 
