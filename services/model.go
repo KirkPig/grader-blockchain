@@ -7,10 +7,24 @@ type AuthorizationRequest struct {
 	Pin       string `json:"pin" binding:"required"`
 }
 
-type AuthorizationResponse struct {
-	Status          string `json:"status" binding:"required"`
-	TransactionHash string `json:"transactionHash" binding:"required"`
-	ErrorLog        string `json:"errorLog",omitempty binding:"required"`
+type SentCodeRequest struct {
+	PublicKey string `json:"publicKey"`
+	StudentId string `json:"studentId"`
+	Pin       string `json:"pin"`
+	Code      string `json:"code"`
+}
+
+type CheckCodeRequest struct {
+	PublicKey string `json:"publicKey"`
+	StudentId string `json:"studentId"`
+	Pin       string `json:"pin"`
+	Code      string `json:"code"`
+}
+
+type Response struct {
+	Status          string `json:"status"`
+	TransactionHash string `json:"transactionHash"`
+	ErrorLog        string `json:"errorLog"`
 }
 
 type Transaction struct {

@@ -5,6 +5,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+/*
+TODO: Setup MySQL repository access
+*/
+
 func main() {
 	router := gin.Default()
 	handler := services.NewHandler(services.NewService())
