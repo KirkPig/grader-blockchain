@@ -35,6 +35,76 @@ func (h *Handler) GetTransactionHandler(c *gin.Context) {
 
 }
 
+func (h *Handler) ChangeKeyHandler(c *gin.Context) {
+
+	var req ChangeKeyRequest
+
+	if err := c.BindJSON(&req); err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	if req.OldPublicKey != "" {
+
+		_, err := h.service.RemoveTrustlines(append(make([]string, 0), req.OldPublicKey))
+
+		if err != nil {
+			c.IndentedJSON(http.StatusBadRequest, &Response{
+				Status:          "Fail",
+				ErrorLog:        fmt.Sprint(err),
+				TransactionHash: "",
+			})
+		}
+
+	}
+
+	response, err := h.service.Authorization(&AuthorizationRequest{
+		PublicKey: req.PublicKey,
+		SecretKey: req.SecretKey,
+		StudentId: req.StudentId,
+		Pin:       req.Pin,
+	})
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: response,
+		})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &Response{
+		Status:          "OK",
+		TransactionHash: response,
+	})
+
+}
+
+func (h *Handler) CloseSystemHandler(c *gin.Context) {
+
+	hash, err := h.service.RemoveAllTrustline()
+
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+	} else {
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "OK",
+			ErrorLog:        "",
+			TransactionHash: hash,
+		})
+	}
+
+}
+
 func (h *Handler) CheckCodeHandler(c *gin.Context) {
 
 	var req CheckCodeRequest

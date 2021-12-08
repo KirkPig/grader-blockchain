@@ -8,6 +8,7 @@ import (
 	"github.com/stellar/go/clients/horizonclient"
 	"github.com/stellar/go/keypair"
 	"github.com/stellar/go/network"
+	"github.com/stellar/go/protocols/horizon"
 	"github.com/stellar/go/txnbuild"
 )
 
@@ -19,6 +20,196 @@ type Service struct {
 
 func NewService() *Service {
 	return &Service{}
+}
+
+func (s *Service) GetBalances() ([]horizon.Balance, error) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	accRequest := horizonclient.AccountRequest{
+		AccountID: accMain_pub,
+	}
+
+	account, err := client.AccountDetail(accRequest)
+
+	if err != nil {
+		return make([]horizon.Balance, 0), err
+	} else {
+		return account.Balances, err
+	}
+
+}
+
+func (s *Service) RemoveAllTrustline() (string, error) {
+	client := horizonclient.DefaultTestNetClient
+
+	accMainPair, err := keypair.ParseFull(accMain_sec)
+
+	if err != nil {
+		return "", err
+	}
+
+	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: accMain_pub,
+	})
+
+	bal, err := s.GetBalances()
+
+	if err != nil {
+		return "", err
+	}
+
+	ops := make([]txnbuild.Operation, 0)
+
+	for _, b := range bal {
+
+		asset := txnbuild.CreditAsset{
+			Code:   "GRADER",
+			Issuer: b.Issuer,
+		}
+
+		if b.Type != "native" {
+
+			if b.Balance != "0.0000000" {
+				ops = append(ops, &txnbuild.Payment{
+					Destination: b.Issuer,
+					Asset:       asset,
+					Amount:      b.Balance,
+				})
+			}
+
+			ops = append(ops, &txnbuild.ChangeTrust{
+				Line: txnbuild.ChangeTrustAssetWrapper{
+					Asset: &asset,
+				},
+				Limit: "0",
+			})
+
+		}
+
+	}
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accMain,
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              txnbuild.MinBaseFee,
+		Timebounds:           txnbuild.NewTimeout(100),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
+	if err != nil {
+		return "", err
+	}
+
+	txe, err := tx.Base64()
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		return "", hError
+	}
+
+	return resp.Hash, nil
+}
+
+func (s *Service) RemoveTrustlines(accPub_list []string) (string, error) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	accMainPair, err := keypair.ParseFull(accMain_sec)
+
+	if err != nil {
+		return "", err
+	}
+
+	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: accMain_pub,
+	})
+
+	bal, err := s.GetBalances()
+
+	if err != nil {
+		return "", err
+	}
+
+	ops := make([]txnbuild.Operation, 0)
+
+	for _, val := range accPub_list {
+
+		chk := false
+
+		for _, b := range bal {
+			if b.Issuer == val {
+				chk = true
+
+				asset := txnbuild.CreditAsset{
+					Code:   "GRADER",
+					Issuer: b.Issuer,
+				}
+
+				if b.Type != "native" {
+					if b.Balance != "0.0000000" {
+						ops = append(ops, &txnbuild.Payment{
+							Destination: b.Issuer,
+							Asset:       asset,
+							Amount:      b.Balance,
+						})
+					}
+
+					ops = append(ops, &txnbuild.ChangeTrust{
+						Line: txnbuild.ChangeTrustAssetWrapper{
+							Asset: &asset,
+						},
+						Limit: "0",
+					})
+				}
+
+				break
+			}
+		}
+
+		if !chk {
+			return "", fmt.Errorf("Some accPub are not in Trustline")
+		}
+
+	}
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accMain,
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              txnbuild.MinBaseFee,
+		Timebounds:           txnbuild.NewTimeout(100),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
+	if err != nil {
+		return "", err
+	}
+
+	txe, err := tx.Base64()
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		return "", hError
+	}
+
+	return resp.Hash, nil
+
 }
 
 func (s *Service) CheckTrustline(accPub string) (bool, error) {
@@ -125,10 +316,6 @@ func (s *Service) GetAllMemo() ([]string, error) {
 }
 
 func (s *Service) MemoCheck(auth string, memo_list []string) bool {
-
-	/*
-		TODO: Check authen in chain
-	*/
 
 	for _, val := range memo_list {
 		if val == auth {
@@ -332,8 +519,8 @@ func (s *Service) Authorization(req *AuthorizationRequest) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair, accStudentPair)
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accStudentPair)
 	if err != nil {
 		return "", err
 	}
