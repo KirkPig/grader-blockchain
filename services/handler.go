@@ -35,13 +35,76 @@ func (h *Handler) GetTransactionHandler(c *gin.Context) {
 
 }
 
+func (h *Handler) CheckCodeHandler(c *gin.Context) {
+
+	var req CheckCodeRequest
+
+	if err := c.BindJSON(&req); err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	hash, err := h.service.CheckCode(req)
+
+	if err != nil {
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+	} else {
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "OK",
+			ErrorLog:        "",
+			TransactionHash: hash,
+		})
+	}
+
+}
+
+func (h *Handler) SentCodeHandler(c *gin.Context) {
+
+	var req SentCodeRequest
+
+	if err := c.BindJSON(&req); err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: "",
+		})
+		return
+	}
+
+	response, err := h.service.SentCode(req)
+	if err != nil {
+		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: response,
+		})
+		return
+	}
+	c.IndentedJSON(http.StatusOK, &Response{
+		Status:          "OK",
+		TransactionHash: response,
+	})
+
+}
+
 func (h *Handler) AuthorizationHandler(c *gin.Context) {
 
 	var req AuthorizationRequest
 
 	if err := c.BindJSON(&req); err != nil {
 		log.Println(err)
-		c.IndentedJSON(http.StatusBadRequest, &AuthorizationResponse{
+		c.IndentedJSON(http.StatusBadRequest, &Response{
 			Status:          "Fail",
 			ErrorLog:        fmt.Sprint(err),
 			TransactionHash: "",
@@ -52,7 +115,16 @@ func (h *Handler) AuthorizationHandler(c *gin.Context) {
 	response, err := h.service.Authorization(&req)
 	if err != nil {
 		log.Println(err)
+		c.IndentedJSON(http.StatusBadRequest, &Response{
+			Status:          "Fail",
+			ErrorLog:        fmt.Sprint(err),
+			TransactionHash: response,
+		})
+		return
 	}
-	c.JSON(http.StatusOK, response)
+	c.IndentedJSON(http.StatusOK, &Response{
+		Status:          "OK",
+		TransactionHash: response,
+	})
 
 }

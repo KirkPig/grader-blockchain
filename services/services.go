@@ -11,8 +11,8 @@ import (
 	"github.com/stellar/go/txnbuild"
 )
 
-var accMain_pub = "GB6YYF7Q3M2TX4IGPWIJNL7HPJSD5HFVNTC4IEFYKIA7WZEPMHFFTSXM"
-var accMain_sec = "SDZBCLOZS5OXTM35LX46MSPVLELLBXOUO5KHNCONIWKEJDPVCFFZ2WOM"
+var accMain_pub = "GATNBMBQEPZ32HZQU4RMAHQJVITXBZS4OVQKFK7BWVZSRALYB3VKEVG4"
+var accMain_sec = "SA3XV35IDKTDROY5UERQIJUSJ6QQCGIRKAULECV25HUQPG3J7UWPK47X"
 
 type Service struct {
 }
@@ -21,27 +21,27 @@ func NewService() *Service {
 	return &Service{}
 }
 
-func (s *Service) CheckTrustline(accPub string) error {
+func (s *Service) CheckTrustline(accPub string) (bool, error) {
 
 	client := horizonclient.DefaultTestNetClient
 
 	accRequest := horizonclient.AccountsRequest{
-		Asset: "GRADER:" + accMain_pub,
+		Asset: "GRADER:" + accPub,
 	}
 
 	accPage, err := client.Accounts(accRequest)
 
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	for _, val := range accPage.Embedded.Records {
-		if val.AccountID == accPub {
-			return fmt.Errorf("Trustline already")
+		if val.AccountID == accMain_pub {
+			return true, fmt.Errorf("Trustline already")
 		}
 	}
 
-	return nil
+	return false, nil
 
 }
 
@@ -94,28 +94,86 @@ func (s *Service) GetAllTransaction(accPub string) ([]Transaction, error) {
 	return transactions, nil
 }
 
-func (s *Service) Authorization(req *AuthorizationRequest) (*AuthorizationResponse, error) {
+func (s *Service) GetHashToken(studentID string, pin string, accPub string) string {
+	sha := sha256.Sum224([]byte(studentID + pin + accPub))
+	return base64.StdEncoding.EncodeToString([]byte(sha[:]))
+}
+
+func (s *Service) GetAllMemo() ([]string, error) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	accRequest := horizonclient.TransactionRequest{
+		ForAccount: accMain_pub,
+	}
+
+	page, err := client.Transactions(accRequest)
+
+	if err != nil {
+		return make([]string, 0), err
+	}
+
+	transaction_list := page.Embedded.Records
+	memo_list := make([]string, 0)
+
+	for _, val := range transaction_list {
+		memo_list = append(memo_list, val.Memo)
+	}
+
+	return memo_list, nil
+
+}
+
+func (s *Service) MemoCheck(auth string, memo_list []string) bool {
+
+	/*
+		TODO: Check authen in chain
+	*/
+
+	for _, val := range memo_list {
+		if val == auth {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (s *Service) CheckCode(req CheckCodeRequest) (string, error) {
+
+	memo_list, err := s.GetAllMemo()
+
+	if err != nil {
+		return "", err
+	}
+
+	auth := s.GetHashToken(req.StudentId, req.Pin, req.PublicKey)
+	authCheck := s.MemoCheck(auth[:28], memo_list)
+
+	if !authCheck {
+		return "", fmt.Errorf("Can't Find Any of your authorization")
+	}
+
+	sha := sha256.Sum224([]byte(auth + req.Code))
+	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
+
+	codeCheck := s.MemoCheck(hash[:28], memo_list)
+
+	if !codeCheck {
+		return "", fmt.Errorf("It's not your code")
+	}
+
+	return "", nil
+}
+
+func (s *Service) SentCode(req SentCodeRequest) (string, error) {
 
 	client := horizonclient.DefaultTestNetClient
 
 	accMainPair, err := keypair.ParseFull(accMain_sec)
 
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
-	}
-
-	accStudentPair, err := keypair.ParseFull(req.SecretKey)
-
-	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
 	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
@@ -123,76 +181,39 @@ func (s *Service) Authorization(req *AuthorizationRequest) (*AuthorizationRespon
 	})
 
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
-	accStudent, err := client.AccountDetail(horizonclient.AccountRequest{
-		AccountID: req.PublicKey,
-	})
+	memo_list, err := s.GetAllMemo()
 
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
-	err = s.CheckTrustline(accStudent.AccountID)
+	auth := s.GetHashToken(req.StudentId, req.Pin, req.PublicKey)
+	authCheck := s.MemoCheck(auth[:28], memo_list)
 
-	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+	if !authCheck {
+		return "", fmt.Errorf("Can't Find Any of your authorization")
 	}
 
-	nativeAsset := txnbuild.NativeAsset{}
+	sha := sha256.Sum224([]byte(auth + req.Code))
+	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
+
 	graderAsset := txnbuild.CreditAsset{
 		Code:   "GRADER",
-		Issuer: accMain_pub,
-	}
-
-	graderFees := txnbuild.Payment{
-		Destination: req.PublicKey,
-		Amount:      "0.1",
-		Asset:       &nativeAsset,
-	}
-	beginSponsor := txnbuild.BeginSponsoringFutureReserves{
-		SourceAccount: accMain_pub,
-		SponsoredID:   req.PublicKey,
-	}
-	changeTrust := txnbuild.ChangeTrust{
-		SourceAccount: req.PublicKey,
-		Line: txnbuild.ChangeTrustAssetWrapper{
-			Asset: &graderAsset,
-		},
-	}
-	endSponsor := txnbuild.EndSponsoringFutureReserves{
-		SourceAccount: req.PublicKey,
+		Issuer: req.PublicKey,
 	}
 
 	graderCoin := txnbuild.Payment{
 		Destination: req.PublicKey,
-		Amount:      "100000",
+		Amount:      "1",
 		Asset:       &graderAsset,
 	}
 
 	ops := []txnbuild.Operation{
-		&graderFees,
-		&beginSponsor,
-		&changeTrust,
-		&endSponsor,
 		&graderCoin,
 	}
-
-	sha := sha256.Sum224([]byte(req.StudentId + req.Pin))
-	hash := base64.StdEncoding.EncodeToString([]byte(sha[:]))
 
 	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
 		SourceAccount:        &accMain,
@@ -203,44 +224,131 @@ func (s *Service) Authorization(req *AuthorizationRequest) (*AuthorizationRespon
 		Memo:                 txnbuild.MemoText(hash[:28]),
 	})
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err, hash),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
-	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair, accStudentPair)
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair)
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
 	txe, err := tx.Base64()
 	if err != nil {
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(err),
-			TransactionHash: "",
-		}, err
+		return "", err
 	}
 
 	resp, err := client.SubmitTransactionXDR(txe)
 	if err != nil {
 		hError := err.(*horizonclient.Error)
-		return &AuthorizationResponse{
-			Status:          "Fail",
-			ErrorLog:        fmt.Sprint(hError),
-			TransactionHash: "",
-		}, hError
+		return "", hError
 	}
 
-	return &AuthorizationResponse{
-		Status:          "OK",
-		TransactionHash: resp.Hash,
-	}, nil
+	return resp.Hash, nil
+
+}
+
+func (s *Service) Authorization(req *AuthorizationRequest) (string, error) {
+
+	client := horizonclient.DefaultTestNetClient
+
+	accMainPair, err := keypair.ParseFull(accMain_sec)
+
+	if err != nil {
+		return "", err
+	}
+
+	accStudentPair, err := keypair.ParseFull(req.SecretKey)
+
+	if err != nil {
+		return "", err
+	}
+
+	accMain, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: accMain_pub,
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	accStudent, err := client.AccountDetail(horizonclient.AccountRequest{
+		AccountID: req.PublicKey,
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	/* Check Duplicate Trustline */
+
+	_, err = s.CheckTrustline(accStudent.AccountID)
+
+	if err != nil {
+		return "", err
+	}
+
+	graderAsset := txnbuild.CreditAsset{
+		Code:   "GRADER",
+		Issuer: req.PublicKey,
+	}
+
+	beginSponsor := txnbuild.BeginSponsoringFutureReserves{
+		SourceAccount: accMain_pub,
+		SponsoredID:   req.PublicKey,
+	}
+	changeTrust := txnbuild.ChangeTrust{
+		Line: txnbuild.ChangeTrustAssetWrapper{
+			Asset: &graderAsset,
+		},
+	}
+	endSponsor := txnbuild.EndSponsoringFutureReserves{
+		SourceAccount: req.PublicKey,
+	}
+
+	graderCoin := txnbuild.Payment{
+		SourceAccount: req.PublicKey,
+		Destination:   accMain_pub,
+		Amount:        "100000",
+		Asset:         &graderAsset,
+	}
+
+	ops := []txnbuild.Operation{
+		&beginSponsor,
+		&changeTrust,
+		&endSponsor,
+		&graderCoin,
+	}
+
+	hash := s.GetHashToken(req.StudentId, req.Pin, req.PublicKey)
+
+	tx, err := txnbuild.NewTransaction(txnbuild.TransactionParams{
+		SourceAccount:        &accMain,
+		IncrementSequenceNum: true,
+		Operations:           ops,
+		BaseFee:              txnbuild.MinBaseFee,
+		Timebounds:           txnbuild.NewTimeout(100),
+		Memo:                 txnbuild.MemoText(hash[:28]),
+	})
+	if err != nil {
+		return "", err
+	}
+
+	tx, err = tx.Sign(network.TestNetworkPassphrase, accMainPair, accStudentPair)
+	if err != nil {
+		return "", err
+	}
+
+	txe, err := tx.Base64()
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := client.SubmitTransactionXDR(txe)
+	if err != nil {
+		hError := err.(*horizonclient.Error)
+		return "", hError
+	}
+
+	return resp.Hash, nil
 
 }
