@@ -21,6 +21,14 @@ type CheckCodeRequest struct {
 	Code      string `json:"code"`
 }
 
+type ChangeKeyRequest struct {
+	PublicKey    string `json:"publicKey"`
+	SecretKey    string `json:"secretKey"`
+	StudentId    string `json:"studentId"`
+	Pin          string `json:"pin"`
+	OldPublicKey string `json:"oldPublicKey"`
+}
+
 type Response struct {
 	Status          string `json:"status"`
 	TransactionHash string `json:"transactionHash"`
